@@ -44,11 +44,15 @@ def process_dir(dirname, config):
         include = re.compile('|'.join(fnmatch.translate(p) for p in config.include_patterns))
         exclude = None
         if len(config.exclude_patterns) > 0:
-          exclude = re.compile('|'.join(fnmatch.translate(p) for p in config.exclude_patterns))
+            exclude = re.compile('|'.join(fnmatch.translate(p) for p in config.exclude_patterns))
         os.chdir(dirname)
         for root, _, files in os.walk(dirname):
             for abspath in sorted([os.path.join(root, f) for f in files]):
-                if include.match(abspath) and (not exclude or not exclude.match(abspath)) and not os.path.islink(abspath):
+                if (
+                    include.match(abspath)
+                    and (not exclude or not exclude.match(abspath))
+                    and not os.path.islink(abspath)
+                ):
                     yield (abspath, dirname)
     else:
         raise Exception
@@ -57,15 +61,15 @@ def process_dir(dirname, config):
 def get_authors(filename, root):
     authors = {}
     try:
-        cmd = 'git log --use-mailmap --follow --pretty=format:"%aN %ad" --date=format:%Y {} | sort | uniq'.format(filename)
-        out = subprocess.check_output(cmd,
-                                shell=True, universal_newlines=True,
-                                cwd=root)
+        cmd = 'git log --use-mailmap --follow --pretty=format:"%aN %ad" --date=format:%Y {} | sort | uniq'.format(
+            filename
+        )
+        out = subprocess.check_output(cmd, shell=True, universal_newlines=True, cwd=root)
         git_info = sorted(out.splitlines())
         years_per_author = defaultdict(set)
         for year_and_author in git_info:
             year_and_author = year_and_author.strip().split(' ')
-            assert len(year_and_author) > 1 # otherwise we have either no name or no year
+            assert len(year_and_author) > 1  # otherwise we have either no name or no year
             author = ' '.join([word for word in year_and_author[:-1]])
             years_per_author[author].add(int(year_and_author[-1]))
         # parse years
@@ -79,7 +83,7 @@ def get_authors(filename, root):
                 current_year = years[ii]
                 if current_year == years[ii - 1] + 1:
                     end_year = current_year
-                else: # current_year > years[ii - 1], since these are sorted
+                else:  # current_year > years[ii - 1], since these are sorted
                     year_ranges.append((start_year, end_year) if end_year > start_year else start_year)
                     end_year = -1
                     start_year = current_year
@@ -104,11 +108,8 @@ def get_authors(filename, root):
     return authors
 
 
-def read_current_header(source_iter, prefix, project_name, copyright_statement, license_str,
-                        url, lead_in, lead_out):
-    header = {'shebang': None,
-              'encoding': None,
-              'comments': []}
+def read_current_header(source_iter, prefix, project_name, copyright_statement, license_str, url, lead_in, lead_out):
+    header = {'shebang': None, 'encoding': None, 'comments': []}
     warning = ''
     could_be_an_author = False
     while True:
@@ -134,18 +135,20 @@ def read_current_header(source_iter, prefix, project_name, copyright_statement, 
                 for ll in ii.split('\n'):
                     can_be_discarded.append(ll.strip().lstrip(prefix).strip())
             if re.match('.*coding[:=]\s*', line):
-                header['encoding'] = line[len(prefix):]
-            elif any([line[len(prefix):].strip().startswith(discard) for discard in can_be_discarded]):
+                header['encoding'] = line[len(prefix) :]
+            elif any([line[len(prefix) :].strip().startswith(discard) for discard in can_be_discarded]):
                 continue
-            elif line[len(prefix):].strip().startswith(url):
+            elif line[len(prefix) :].strip().startswith(url):
                 continue
-            elif any([line[len(prefix):].strip().startswith(some_url) for some_url in ('http://', 'https://')]):
-                warning = 'dropping url \'{}\'!'.format(line[len(prefix):].strip())
-            elif line[len(prefix):].strip().startswith('Authors:'): # the following header lines may be authors
+            elif any([line[len(prefix) :].strip().startswith(some_url) for some_url in ('http://', 'https://')]):
+                warning = 'dropping url \'{}\'!'.format(line[len(prefix) :].strip())
+            elif line[len(prefix) :].strip().startswith('Authors:'):  # the following header lines may be authors
                 could_be_an_author = True
                 continue
             elif could_be_an_author:
-                if line[len(prefix):].startswith('  ') and line.strip()[-1] == ')': # we just have to assume that this is an author line
+                if (
+                    line[len(prefix) :].startswith('  ') and line.strip()[-1] == ')'
+                ):  # we just have to assume that this is an author line
                     continue
                 else:
                     could_be_an_author = False
@@ -156,8 +159,9 @@ def read_current_header(source_iter, prefix, project_name, copyright_statement, 
     return header, warning, line
 
 
-def write_header(target, header, authors, license_str, prefix, project_name, url,
-                 max_width, copyright_statement, lead_in, lead_out):
+def write_header(
+    target, header, authors, license_str, prefix, project_name, url, max_width, copyright_statement, lead_in, lead_out
+):
     shebang, encoding = header['shebang'], header['encoding']
     if shebang:
         target.write(shebang + '\n')
@@ -202,10 +206,11 @@ def write_header(target, header, authors, license_str, prefix, project_name, url
             line = line.strip()
             if first_real_comment_line:
                 ret.append(line)
-            elif len(line) >= len(line) and len(line[len(prefix):].strip()) > 0:
+            elif len(line) >= len(line) and len(line[len(prefix) :].strip()) > 0:
                 first_real_comment_line = True
                 ret.append(line)
         return ret
+
     comments = header['comments']
     if comments and len(comments) > 0:
         comments.reverse()
@@ -222,13 +227,14 @@ def write_header(target, header, authors, license_str, prefix, project_name, url
 
 def process_file(filename, config, root):
     # parse config
-    assert(hasattr(config, 'name'))
+    assert hasattr(config, 'name')
     project_name = config.name.strip()
-    assert(hasattr(config, 'license'))
+    assert hasattr(config, 'license')
     license_str = config.license
     url = getattr(config, 'url', None)
-    copyright_statement = getattr(config, 'copyright_statement',
-                                  'The copyright lies with the authors of this file (see below).')
+    copyright_statement = getattr(
+        config, 'copyright_statement', 'The copyright lies with the authors of this file (see below).'
+    )
     max_width = getattr(config, 'max_width', 78)
     prefix = getattr(config, 'prefix', '#')
     lead_out = getattr(config, 'lead_out', None)
@@ -240,12 +246,12 @@ def process_file(filename, config, root):
     source.append(None)
     source_iter = iter(source)
 
-    print('*'*88)
+    print('*' * 88)
     print(license_str)
     print('*' * 88)
-    header, warning, last_header_line = read_current_header(source_iter, prefix,
-                                                            project_name, copyright_statement,
-                                                            license_str, url, lead_in, lead_out)
+    header, warning, last_header_line = read_current_header(
+        source_iter, prefix, project_name, copyright_statement, license_str, url, lead_in, lead_out
+    )
     line = last_header_line
     # write new file
     with open(filename, 'w') as target:
@@ -254,8 +260,19 @@ def process_file(filename, config, root):
         while line is not None and line.isspace():
             line = next(source_iter)
 
-        write_header(target, header, authors, license_str, prefix, project_name,
-                     url, max_width, copyright_statement, lead_in, lead_out)
+        write_header(
+            target,
+            header,
+            authors,
+            license_str,
+            prefix,
+            project_name,
+            url,
+            max_width,
+            copyright_statement,
+            lead_in,
+            lead_out,
+        )
         target.write('\n')
 
         # copy all remaining content
@@ -272,11 +289,12 @@ def main():
     verbose = '--verbose' in args
     cfg = args['--cfg']
     import importlib.util
+
     spec = importlib.util.spec_from_file_location("config", cfg)
     config = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(config)
     for filename, dirname in process_dir(args['PATH'], config):
-        print('{}: '.format(filename[(len(dirname)):]), end='')
+        print('{}: '.format(filename[(len(dirname)) :]), end='')
         try:
             res = process_file(filename, config, dirname if dirname != '' else '.')
             print('{}'.format(res if len(res) else 'success'))

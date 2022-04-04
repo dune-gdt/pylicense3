@@ -15,6 +15,7 @@ def test_import():
 def test_command_line_interface():
     """Test the CLI."""
     from pylicense3 import cli
+
     runner = CliRunner()
     result = runner.invoke(cli.main)
     assert result.exit_code == 0
