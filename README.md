@@ -1,51 +1,40 @@
-pylicense
+pylicense3
 =========
+
+[![image](https://img.shields.io/pypi/v/pylicense3.svg)](https://pypi.python.org/pypi/pylicense3)
+
+[![image](https://github.com/WWU-AMM/pylicense3/workflows/pytest/badge.svg)](https://github.com/WWU-AMM/pylicense3/actions)
+
+[![Documentation Status](https://readthedocs.org/projects/pylicense3/badge/?version=latest)](https://pylicense3.readthedocs.io/en/latest/?badge=latest)
+
 
 Apply license information to a git project.
 
-Configuration
-=============
+-   Free software: BSD license
+-   Documentation: <https://pylicense3.readthedocs.io>.
+-   [![Live examples](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/WWU-AMM/pylicense3/HEAD?filepath=docs%2Fexamples%2F)
 
-Configuration files are python data and expect a few variables to be defined.
 
-Example `config.py`:
-```python
-name = 'This file is part of the dune-xt project:'
-url = 'https://github.com/dune-community/dune-xt'
-copyright_statement = 'Copyright 2009-2018 dune-xt developers and contributors. All rights reserved.'
-license = '''Dual licensed as BSD 2-Clause License (http://opensource.org/licenses/BSD-2-Clause)
-      or  GPL-2.0+ (http://opensource.org/licenses/gpl-license)
-          with "runtime exception" (http://www.dune-project.org/license.html)'''
-prefix = '#'
-lead_in = '# ~~~'
-lead_out = '# ~~~'
+Features
+--------
 
-include_patterns = ('*.cc', '*.cxx', '*.hh', '*.hxx', '*cmake_config.h.in', '*headercheck.cpp.in', '*config.h.cmake',
-                    '*version.hh.in', '*.pbh')
-exclude_patterns = ('*mathexpr.*', '*gtest-all.cc', '*.vcsetup*', '*gtest-all.cxx',
-                    '*dune/xt/functions/expression/mathexpr.cc', '*dune/xt/functions/expression/mathexpr.hh')
-```
+-   TODO
 
-Results in this header (where git log yields two authors editing that file):
-```bash
-# ~~~
-# This file is part of the dune-xt project:
-#   https://github.com/dune-community/dune-xt
-# Copyright 2009-2018 dune-xt developers and contributors. All rights reserved.
-# License: Dual licensed as BSD 2-Clause License (http://opensource.org/licenses/BSD-2-Clause)
-#      or  GPL-2.0+ (http://opensource.org/licenses/gpl-license)
-#          with "runtime exception" (http://www.dune-project.org/license.html)
-# Authors:
-#   René Fritze    (2018 - 2019)
-#   Tobias Leibner (2019)
-# ~~~
-```
+After generating your project
+-----------------------------
 
-`lead_in` and `lead_out` are optional and default to `prefix`.
+- Setup github secrets for pypi [github project settings](https://github.com/WWU-AMM/pylicense3/settings/secrets/actions/new):
+   - `PYPI_TOKEN` for "real" deploys on git tags
+   - `TEST_PYPI_TOKEN` for deploys to test.pypi.org
+- enable project on [readthedocs.org](https://readthedocs.org/dashboard/import/?)
+- setup branch protection+automerge in [github project settings](https://github.com/WWU-AMM/pylicense3/settings/branches)
+- Fix `Live examples` link above
 
-Usage
-=====
 
-`pylicense --cfg=CONFIG.PY SOMEDIR_WITH_SOURCE_FILES`
+Credits
+-------
 
-Be aware that the script changes files in-place w/o backup.
+This package was created with
+[Cookiecutter](https://github.com/audreyr/cookiecutter) and the
+[WWU-AMM/python_cookiecutter](https://github.com/WWU-AMM/python_cookiecutter)
+project template.
