@@ -6,9 +6,7 @@ myst-nb>=0.13.2
 packaging
 pytest-runner>=2.9
 python-slugify
-rich
 setuptools
 sphinx
 sphinx-autoapi>=1.8
-typer
 wheel

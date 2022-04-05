@@ -15,3 +15,12 @@ black:
 
 docs:
 	make -C docs html
+
+dist:
+	python3 -m build
+
+upload:
+	twine upload dist/*
+
+test_upload:
+	twine upload --repository testpypi dist/*

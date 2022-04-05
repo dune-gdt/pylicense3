@@ -14,8 +14,6 @@ def setup_requires():
 
 install_requires = [
     "packaging",
-    "typer",
-    "rich",
     "docopt-ng",
 ] + setup_requires()
 install_suggests = {
