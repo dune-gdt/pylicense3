@@ -2,7 +2,5 @@
 docopt-ng
 packaging
 pytest-runner>=2.9
-rich
 setuptools
-typer
 wheel
