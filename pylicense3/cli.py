@@ -54,7 +54,7 @@ def process_dir(dirname, config):
         raise Exception
 
 
-def get_authors(filename, root):
+def get_git_authors(filename, root):
     authors = {}
     try:
         cmd = 'git log --use-mailmap --follow --pretty=format:"%aN %ad" --date=format:%Y {} | sort | uniq'.format(
@@ -183,17 +183,20 @@ def write_header(
     # license_str
     l_str = '\n{}'.format(prefix).join(license_str.split('\n'))
     target.write(u'{} License: {}\n'.format(prefix, l_str))
-    # authors
-    target.write(prefix + ' Authors:\n')
-    max_author_length = 0
-    for author in authors:
-        max_author_length = max(max_author_length, len(author))
-    for author in sorted(authors.keys()):
-        year = '(' + authors[author] + ')'
-        if len(prefix) + 4 + max_author_length + len(year) <= max_width:
-            for ii in range(max_author_length - len(author)):
-                author += ' '
-        target.write(u'{}   {} {}\n'.format(prefix, author, year))
+    # authors, either as dict with years or only a contribution team
+    if isinstance(authors, str):
+        target.write(prefix + f' Contributors team: {authors}\n')
+    else:
+        target.write(prefix + ' Authors:\n')
+        max_author_length = 0
+        for author in authors:
+            max_author_length = max(max_author_length, len(author))
+        for author in sorted(authors.keys()):
+            year = '(' + authors[author] + ')'
+            if len(prefix) + 4 + max_author_length + len(year) <= max_width:
+                for ii in range(max_author_length - len(author)):
+                    author += ' '
+            target.write(u'{}   {} {}\n'.format(prefix, author, year))
     # comments
     def prune_first_empty_comments(ll):
         first_real_comment_line = False
@@ -235,8 +238,11 @@ def process_file(filename, config, root):
     prefix = getattr(config, 'prefix', '#')
     lead_out = getattr(config, 'lead_out', None)
     lead_in = getattr(config, 'lead_in', None)
-    # read authors and respective years
-    authors = get_authors(filename, root)
+    if hasattr(config, 'contributors_team'):
+        authors = getattr(config, 'contributors_team')
+    else:
+        # read authors and respective years
+        authors = get_git_authors(filename, root)
 
     source = open(filename).readlines()
     source.append(None)
@@ -290,7 +296,7 @@ def main():
     config = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(config)
     for filename, dirname in process_dir(args['PATH'], config):
-        print('{}: '.format(filename[(len(dirname)) :]), end='')
+        print('{}: '.format(filename[(len(dirname)):]), end='')
         try:
             res = process_file(filename, config, dirname if dirname != '' else '.')
             print('{}'.format(res if len(res) else 'success'))
