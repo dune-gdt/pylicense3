@@ -112,4 +112,4 @@ autoapi_type = 'python'
 autoapi_keep_files = True
 autoapi_template_dir = this_dir / '_templates' / 'autoapi'
 
-jupyter_execute_notebooks = "cache"
+nb_execution_mode = "cache"
