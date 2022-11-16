@@ -296,7 +296,7 @@ def main():
     config = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(config)
     for filename, dirname in process_dir(args['PATH'], config):
-        print('{}: '.format(filename[(len(dirname)):]), end='')
+        print('{}: '.format(filename[(len(dirname)) :]), end='')
         try:
             res = process_file(filename, config, dirname if dirname != '' else '.')
             print('{}'.format(res if len(res) else 'success'))
