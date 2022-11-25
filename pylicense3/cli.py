@@ -185,7 +185,7 @@ def write_header(
     target.write(u'{} License: {}\n'.format(prefix, l_str))
     # authors, either as dict with years or only a contribution team
     if isinstance(authors, str):
-        target.write(f' {prefix} {authors}\n')
+        target.write(f'{prefix} {authors}\n')
     else:
         target.write(prefix + ' Authors:\n')
         max_author_length = 0
