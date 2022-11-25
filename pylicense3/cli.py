@@ -238,7 +238,7 @@ def process_file(filename, config, root):
     prefix = getattr(config, 'prefix', '#')
     lead_out = getattr(config, 'lead_out', None)
     lead_in = getattr(config, 'lead_in', None)
-    authors = getattr(config, 'contributors_team', get_git_authors(filename, root)
+    authors = getattr(config, 'contributors_team', get_git_authors(filename, root))
 
     source = open(filename).readlines()
     source.append(None)
