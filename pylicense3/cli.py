@@ -185,7 +185,7 @@ def write_header(
     target.write(u'{} License: {}\n'.format(prefix, l_str))
     # authors, either as dict with years or only a contribution team
     if isinstance(authors, str):
-        target.write(prefix + f' Contributors team: {authors}\n')
+        target.write(f' {prefix} {authors}\n')
     else:
         target.write(prefix + ' Authors:\n')
         max_author_length = 0
@@ -238,11 +238,7 @@ def process_file(filename, config, root):
     prefix = getattr(config, 'prefix', '#')
     lead_out = getattr(config, 'lead_out', None)
     lead_in = getattr(config, 'lead_in', None)
-    if hasattr(config, 'contributors_team'):
-        authors = getattr(config, 'contributors_team')
-    else:
-        # read authors and respective years
-        authors = get_git_authors(filename, root)
+    authors = getattr(config, 'contributors_team', get_git_authors(filename, root)
 
     source = open(filename).readlines()
     source.append(None)
