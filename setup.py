@@ -49,7 +49,7 @@ setup(
     keywords="pylicense3",
     name="pylicense3",
     packages=find_packages(include=["pylicense3", "pylicense3.*"]),
-    url="https://github.com/WWU-AMM/pylicense3",
+    url="https://github.com/dune-gdt/pylicense3",
     version=versioneer.get_version(),
     cmdclass=versioneer.get_cmdclass(),
     zip_safe=False,

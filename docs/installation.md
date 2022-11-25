@@ -31,7 +31,7 @@ You can either clone the public repository:
 
 ```{code-block} console
 
-$ git clone https://github.com/WWU-AMM/pylicense3.git
+$ git clone https://github.com/dune-gdt/pylicense3.git
 
 ```
 
@@ -39,7 +39,7 @@ Or download the [tarball][tarball]:
 
 ```{code-block} console
 
-$ curl -OJL https://github.com/WWU-AMM/pylicense3/tarball/main
+$ curl -OJL https://github.com/dune-gdt/pylicense3/tarball/main
 
 ```
 
@@ -51,6 +51,6 @@ $ pip install .
 
 ```
 
-[github repo]: https://github.com/WWU-AMM/pylicense3
+[github repo]: https://github.com/dune-gdt/pylicense3
 
-[tarball]: https://github.com/WWU-AMM/pylicense3/tarball/main
+[tarball]: https://github.com/dune-gdt/pylicense3/tarball/main
