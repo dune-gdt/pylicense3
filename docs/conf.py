@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 #
-# https://github.com/WWU-AMM/pylicense3 documentation build configuration file, created by
+# https://github.com/dune-gdt/pylicense3 documentation build configuration file, created by
 # sphinx-quickstart on Fri Jun  9 13:47:02 2017.
 #
 # This file is execfile()d with the current directory set to its
