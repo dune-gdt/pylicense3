@@ -197,6 +197,7 @@ def write_header(
                 for ii in range(max_author_length - len(author)):
                     author += ' '
             target.write(u'{}   {} {}\n'.format(prefix, author, year))
+
     # comments
     def prune_first_empty_comments(ll):
         first_real_comment_line = False
@@ -253,7 +254,6 @@ def process_file(filename, config, root):
     line = last_header_line
     # write new file
     with open(filename, 'w') as target:
-
         # skip lines containing only whitespace
         while line is not None and line.isspace():
             line = next(source_iter)
