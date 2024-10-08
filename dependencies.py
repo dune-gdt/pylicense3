@@ -22,7 +22,7 @@ install_suggests = {
 doc_requires = [
     "sphinx",
     "python-slugify",
-    "myst-nb>=0.13.2",
+    "myst-nb>=1.1.2",
     "sphinx-autoapi>=1.8",
 ] + install_requires
 ci_requires = [
