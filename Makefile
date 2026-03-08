@@ -1,26 +1,25 @@
-#!/usr/bin/env make
+.PHONY: sync lint format test docs build publish precommit
 
-# this loads $(ENV_FILE) as both makefile variables and into shell env
-ENV_FILE?=.env
-include $(ENV_FILE)
-export $(shell sed 's/=.*//' $(ENV_FILE))
+sync:
+	uv sync
 
-.PHONY:  deps black docs
+lint:
+	uv run --group lint ruff check .
 
-deps:
-	./dependencies.py
+format:
+	uv run --group lint ruff format .
 
-black:
-	black docs pylicense3 tests
+test:
+	uv run --group test pytest
 
 docs:
-	make -C docs html
+	uv run --group docs sphinx-build -W -b html docs docs/_build/html
 
-dist:
-	python3 -m build
+build:
+	uv build
 
-upload:
-	twine upload dist/*
+publish:
+	uv run --group release twine upload dist/*
 
-test_upload:
-	twine upload --repository testpypi dist/*
+precommit:
+	uv run --group lint pre-commit run --all-files
