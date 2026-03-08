@@ -11,3 +11,5 @@ def test_version():
 
 def test_import():
     import pylicense3
+
+    assert pylicense3 is not None

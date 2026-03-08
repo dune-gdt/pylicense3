@@ -1,106 +1,129 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 
-# pylicense (https://github.com/ftalbrecht/pylicense): pylicense
-# Copyright Holders: Felix Albrecht
-# License: BSD 2-Clause License (http://opensource.org/licenses/BSD-2-Clause)
-
-"""
-Add header to a given file.
+"""Add header to a given file.
 
 Usage:
     pylicense [-hv] [--help] [--verbose] --cfg=CONFIG_FILE PATH
 
-
 Arguments:
-    PATH            Directory or file to process.
+    PATH                   Directory or file to process.
 
 Options:
-    -h, --help      Show this message.
-
-    -v, --verbose   Be verbose.
+    --cfg=CONFIG_FILE      Python config file describing header generation.
+    -h, --help             Show this message.
+    -v, --verbose          Be verbose.
 """
 
-from docopt import docopt
-from collections import defaultdict
-import subprocess
-import os
-import re
+from __future__ import annotations
+
 import fnmatch
+import importlib.util
+import re
+import subprocess
+from collections import defaultdict
+from pathlib import Path
+
+from docopt import docopt
 
 
 class GitError(Exception):
-    pass
+    """Raised when git metadata required for header generation cannot be computed."""
 
 
-def process_dir(dirname, config):
-    if os.path.isfile(dirname):
-        yield (dirname, '')
-    elif os.path.isdir(dirname):
-        include = re.compile('|'.join(fnmatch.translate(p) for p in config.include_patterns))
-        exclude = None
-        if len(config.exclude_patterns) > 0:
-            exclude = re.compile('|'.join(fnmatch.translate(p) for p in config.exclude_patterns))
-        os.chdir(dirname)
-        for root, _, files in os.walk(dirname):
-            for abspath in sorted([os.path.join(root, f) for f in files]):
-                if (
-                    include.match(abspath)
-                    and (not exclude or not exclude.match(abspath))
-                    and not os.path.islink(abspath)
-                ):
-                    yield (abspath, dirname)
-    else:
-        raise Exception
+def _compile_patterns(patterns: list[str]) -> re.Pattern[str]:
+    if not patterns:
+        patterns = ['*']
+    return re.compile('|'.join(fnmatch.translate(pattern) for pattern in patterns))
 
 
-def get_git_authors(filename, root):
-    authors = {}
+def _format_year_range(year_range: int | tuple[int, int]) -> str:
+    if isinstance(year_range, tuple):
+        start, end = year_range
+        return f'{start} - {end}'
+    return f'{year_range}'
+
+
+def process_dir(dirname: str, config):
+    candidate = Path(dirname)
+    if candidate.is_file():
+        yield str(candidate), ''
+        return
+
+    if not candidate.is_dir():
+        raise FileNotFoundError(dirname)
+
+    include = _compile_patterns(getattr(config, 'include_patterns', ['*']))
+    exclude_patterns = getattr(config, 'exclude_patterns', [])
+    exclude = _compile_patterns(exclude_patterns) if exclude_patterns else None
+
+    root = candidate.resolve()
+    for path in sorted(root.rglob('*')):
+        if not path.is_file() or path.is_symlink():
+            continue
+
+        relative_path = path.relative_to(root).as_posix()
+        if include.match(relative_path) and (exclude is None or not exclude.match(relative_path)):
+            yield str(path), str(root)
+
+
+def get_git_authors(filename: str, root: str) -> dict[str, str]:
+    years_per_author: dict[str, set[int]] = defaultdict(set)
+    filename_path = Path(filename)
+    root_path = Path(root)
+
     try:
-        cmd = 'git log --use-mailmap --follow --pretty=format:"%aN %ad" --date=format:%Y {} | sort | uniq'.format(
-            filename
-        )
-        out = subprocess.check_output(cmd, shell=True, universal_newlines=True, cwd=root)
-        git_info = sorted(out.splitlines())
-        years_per_author = defaultdict(set)
-        for year_and_author in git_info:
-            year_and_author = year_and_author.strip().split(' ')
-            assert len(year_and_author) > 1  # otherwise we have either no name or no year
-            author = ' '.join([word for word in year_and_author[:-1]])
-            years_per_author[author].add(int(year_and_author[-1]))
-        # parse years
-        for author, years in years_per_author.items():
-            years = sorted(years)
-            assert len(years) > 0
-            year_ranges = []
-            start_year = years[0]
-            end_year = -1
-            for ii in range(1, len(years)):
-                current_year = years[ii]
-                if current_year == years[ii - 1] + 1:
-                    end_year = current_year
-                else:  # current_year > years[ii - 1], since these are sorted
-                    year_ranges.append((start_year, end_year) if end_year > start_year else start_year)
-                    end_year = -1
-                    start_year = current_year
-            if end_year > start_year:
-                year_ranges.append((start_year, end_year))
-            elif len(year_ranges) == 0 or start_year != years[0]:
-                year_ranges.append(start_year)
+        relative_path = filename_path.resolve().relative_to(root_path.resolve())
+    except ValueError:
+        relative_path = filename_path
 
-            def years_to_string(year_range):
-                if isinstance(year_range, tuple):
-                    assert len(year_range) == 2
-                    return '{} - {}'.format(year_range[0], year_range[1])
-                else:
-                    return '{}'.format(year_range)
+    command = [
+        'git',
+        'log',
+        '--use-mailmap',
+        '--follow',
+        '--pretty=format:%aN %ad',
+        '--date=format:%Y',
+        str(relative_path),
+    ]
 
-            assert len(year_ranges)
-            authors[author] = years_to_string(year_ranges[0])
-            for ii in range(1, len(year_ranges)):
-                authors[author] += ', ' + years_to_string(year_ranges[ii])
-    except KeyError as e:
-        raise GitError('failed to extract authors from git history!')
+    try:
+        output = subprocess.check_output(command, text=True, cwd=root)
+    except subprocess.CalledProcessError as error:
+        raise GitError('failed to extract authors from git history!') from error
+
+    for line in sorted(set(output.splitlines())):
+        author_and_year = line.strip().rsplit(' ', 1)
+        if len(author_and_year) != 2:
+            continue
+
+        author, year_text = author_and_year
+        try:
+            year = int(year_text)
+        except ValueError:
+            continue
+        years_per_author[author].add(year)
+
+    authors: dict[str, str] = {}
+    for author, years in years_per_author.items():
+        if not years:
+            continue
+
+        sorted_years = sorted(years)
+        year_ranges: list[int | tuple[int, int]] = []
+        start_year = sorted_years[0]
+        end_year = start_year
+
+        for year in sorted_years[1:]:
+            if year == end_year + 1:
+                end_year = year
+                continue
+            year_ranges.append((start_year, end_year) if end_year > start_year else start_year)
+            start_year = year
+            end_year = year
+
+        year_ranges.append((start_year, end_year) if end_year > start_year else start_year)
+        authors[author] = ', '.join(_format_year_range(year_range) for year_range in year_ranges)
+
     return authors
 
 
@@ -112,10 +135,12 @@ def read_current_header(source_iter, prefix, project_name, copyright_statement, 
         line = next(source_iter)
         if line is None:
             break
+
         dirt_to_remove = ['\xef', '\xbb', '\xbf']
         while len(line) > 0 and line[0] in dirt_to_remove:
             for dirt in dirt_to_remove:
                 line = line.lstrip(dirt)
+
         if len(line) == 0:
             break
         if line.startswith('#!') and len(line.strip()) > 2:
@@ -125,115 +150,120 @@ def read_current_header(source_iter, prefix, project_name, copyright_statement, 
             continue
         if not line.startswith(prefix):
             break
+
+        can_be_discarded = ['Copyright', 'copyright', 'License']
+        for entry in (project_name, copyright_statement, license_str):
+            for raw_line in entry.split('\n'):
+                can_be_discarded.append(raw_line.strip().lstrip(prefix).strip())
+
+        line_without_prefix = line[len(prefix) :].strip()
+        if re.match(r'.*coding[:=]\s*', line):
+            header['encoding'] = line[len(prefix) :]
+        elif any(line_without_prefix.startswith(discard) for discard in can_be_discarded) or (
+            url and line_without_prefix.startswith(url)
+        ):
+            continue
+        elif any(line_without_prefix.startswith(some_url) for some_url in ('http://', 'https://')):
+            warning = f"dropping url '{line_without_prefix}'!"
+        elif line_without_prefix.startswith('Authors:'):
+            could_be_an_author = True
+            continue
+        elif could_be_an_author:
+            if line[len(prefix) :].startswith('  ') and line.strip()[-1:] == ')':
+                continue
+            could_be_an_author = False
+            header['comments'].append(line)
         else:
-            can_be_discarded = ['Copyright', 'copyright', 'License']
-            for ii in (project_name, copyright_statement, license_str):
-                for ll in ii.split('\n'):
-                    can_be_discarded.append(ll.strip().lstrip(prefix).strip())
-            if re.match('.*coding[:=]\s*', line):
-                header['encoding'] = line[len(prefix) :]
-            elif any([line[len(prefix) :].strip().startswith(discard) for discard in can_be_discarded]):
-                continue
-            elif line[len(prefix) :].strip().startswith(url):
-                continue
-            elif any([line[len(prefix) :].strip().startswith(some_url) for some_url in ('http://', 'https://')]):
-                warning = 'dropping url \'{}\'!'.format(line[len(prefix) :].strip())
-            elif line[len(prefix) :].strip().startswith('Authors:'):  # the following header lines may be authors
-                could_be_an_author = True
-                continue
-            elif could_be_an_author:
-                if (
-                    line[len(prefix) :].startswith('  ') and line.strip()[-1] == ')'
-                ):  # we just have to assume that this is an author line
-                    continue
-                else:
-                    could_be_an_author = False
-                    # from now on this is a comment
-                    header['comments'].append(line)
-            else:
-                header['comments'].append(line)
+            header['comments'].append(line)
+
     return header, warning, line
 
 
 def write_header(
-    target, header, authors, license_str, prefix, project_name, url, max_width, copyright_statement, lead_in, lead_out
+    target,
+    header,
+    authors,
+    license_str,
+    prefix,
+    project_name,
+    url,
+    max_width,
+    copyright_statement,
+    lead_in,
+    lead_out,
 ):
     shebang, encoding = header['shebang'], header['encoding']
     if shebang:
-        target.write(shebang + '\n')
+        target.write(f'{shebang}\n')
     if encoding:
-        target.write(prefix + ' ' + encoding + '\n')
+        target.write(f'{prefix} {encoding}\n')
     if shebang or encoding:
-        target.write(prefix + '\n')
+        target.write(f'{prefix}\n')
     if lead_in:
-        target.write(lead_in + '\n')
-    # project name and url
-    line = prefix + ' ' + project_name
+        target.write(f'{lead_in}\n')
+
+    line = f'{prefix} {project_name}'
     if url is not None:
         if len(line) + len(url) + len('().') <= max_width:
-            target.write(u'{line} ({url}).\n'.format(line=line, url=url))
+            target.write(f'{line} ({url}).\n')
         else:
-            target.write(line + '\n')
+            target.write(f'{line}\n')
             if max_width - len(prefix) - 1 - len(url):
-                target.write(u'{prefix}   {url}\n'.format(prefix=prefix, url=url))
+                target.write(f'{prefix}   {url}\n')
             else:
-                target.write(u'{prefix} {url}\n'.format(prefix=prefix, url=url))
-    # copyright statement
-    target.write(prefix + ' ' + copyright_statement + '\n')
-    # license_str
-    l_str = '\n{}'.format(prefix).join(license_str.split('\n'))
-    target.write(u'{} License: {}\n'.format(prefix, l_str))
-    # authors, either as dict with years or only a contribution team
+                target.write(f'{prefix} {url}\n')
+
+    target.write(f'{prefix} {copyright_statement}\n')
+
+    l_str = f'\n{prefix}'.join(license_str.split('\n'))
+    target.write(f'{prefix} License: {l_str}\n')
+
     if isinstance(authors, str):
         target.write(f'{prefix} {authors}\n')
     else:
-        target.write(prefix + ' Authors:\n')
-        max_author_length = 0
-        for author in authors:
-            max_author_length = max(max_author_length, len(author))
+        target.write(f'{prefix} Authors:\n')
+        max_author_length = max((len(author) for author in authors), default=0)
         for author in sorted(authors.keys()):
-            year = '(' + authors[author] + ')'
+            year = f'({authors[author]})'
+            padded_author = author
             if len(prefix) + 4 + max_author_length + len(year) <= max_width:
-                for ii in range(max_author_length - len(author)):
-                    author += ' '
-            target.write(u'{}   {} {}\n'.format(prefix, author, year))
+                padded_author = author.ljust(max_author_length)
+            target.write(f'{prefix}   {padded_author} {year}\n')
 
-    # comments
-    def prune_first_empty_comments(ll):
+    def prune_first_empty_comments(lines):
         first_real_comment_line = False
-        ret = []
-        for line in ll:
-            line = line.strip()
+        result = []
+        for raw_line in lines:
+            raw_line = raw_line.strip()
             if first_real_comment_line:
-                ret.append(line)
-            elif len(line) >= len(line) and len(line[len(prefix) :].strip()) > 0:
+                result.append(raw_line)
+            elif len(raw_line[len(prefix) :].strip()) > 0:
                 first_real_comment_line = True
-                ret.append(line)
-        return ret
+                result.append(raw_line)
+        return result
 
     comments = header['comments']
-    if comments and len(comments) > 0:
+    if comments:
         comments.reverse()
         comments = prune_first_empty_comments(comments)
         comments.reverse()
         comments = prune_first_empty_comments(comments)
-        if len(comments) > 0:
-            target.write(prefix + '\n')
+        if comments:
+            target.write(f'{prefix}\n')
         for comment in comments:
-            target.write(comment + '\n')
+            target.write(f'{comment}\n')
     if lead_out:
-        target.write(lead_out + '\n')
+        target.write(f'{lead_out}\n')
 
 
 def process_file(filename, config, root):
-    # parse config
-    assert hasattr(config, 'name')
     project_name = config.name.strip()
-    assert hasattr(config, 'license')
     license_str = config.license
     url = getattr(config, 'url', None)
     copyright_statement = getattr(
-        config, 'copyright_statement', 'The copyright lies with the authors of this file (see below).'
+        config,
+        'copyright_statement',
+        'The copyright lies with the authors of this file (see below).',
     )
     max_width = getattr(config, 'max_width', 78)
     prefix = getattr(config, 'prefix', '#')
@@ -241,7 +271,9 @@ def process_file(filename, config, root):
     lead_in = getattr(config, 'lead_in', None)
     authors = getattr(config, 'contributors_team', get_git_authors(filename, root))
 
-    source = open(filename).readlines()
+    with open(filename, encoding='utf-8', errors='surrogateescape') as source_file:
+        source = source_file.readlines()
+
     source.append(None)
     source_iter = iter(source)
 
@@ -249,12 +281,18 @@ def process_file(filename, config, root):
     print(license_str)
     print('*' * 88)
     header, warning, last_header_line = read_current_header(
-        source_iter, prefix, project_name, copyright_statement, license_str, url, lead_in, lead_out
+        source_iter,
+        prefix,
+        project_name,
+        copyright_statement,
+        license_str,
+        url,
+        lead_in,
+        lead_out,
     )
+
     line = last_header_line
-    # write new file
-    with open(filename, 'w') as target:
-        # skip lines containing only whitespace
+    with open(filename, 'w', encoding='utf-8', errors='surrogateescape') as target:
         while line is not None and line.isspace():
             line = next(source_iter)
 
@@ -273,7 +311,6 @@ def process_file(filename, config, root):
         )
         target.write('\n')
 
-        # copy all remaining content
         while line is not None:
             target.write(line)
             line = next(source_iter)
@@ -282,22 +319,24 @@ def process_file(filename, config, root):
 
 
 def main():
-    # parse arguments
     args = docopt(__doc__)
-    verbose = '--verbose' in args
     cfg = args['--cfg']
-    import importlib.util
 
-    spec = importlib.util.spec_from_file_location("config", cfg)
+    spec = importlib.util.spec_from_file_location('config', cfg)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f'failed to load config from {cfg!r}')
+
     config = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(config)
+
     for filename, dirname in process_dir(args['PATH'], config):
-        print('{}: '.format(filename[(len(dirname)) :]), end='')
+        display_name = filename[len(dirname) :] if dirname and filename.startswith(dirname) else filename
+        print(f'{display_name}: ', end='')
         try:
-            res = process_file(filename, config, dirname if dirname != '' else '.')
-            print('{}'.format(res if len(res) else 'success'))
-        except GitError as e:
-            print(e)
+            result = process_file(filename, config, dirname if dirname else '.')
+            print(result if result else 'success')
+        except GitError as error:
+            print(error)
 
 
 if __name__ == '__main__':

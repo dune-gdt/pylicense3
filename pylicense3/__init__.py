@@ -1,9 +1,8 @@
 """Top-level package for pylicense3."""
 
-__author__ = """ René Fritze"""
-__email__ = " rené.fritze@wwu.de"
+from importlib.metadata import PackageNotFoundError, version
 
-from ._version import get_versions
-
-__version__ = get_versions()["version"]
-del get_versions
+try:
+    __version__ = version('pylicense3')
+except PackageNotFoundError:
+    __version__ = '0.0.0'
