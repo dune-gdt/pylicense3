@@ -1,0 +1,28 @@
+name: Release
+
+on:
+    push:
+        tags:
+            - 'v*'
+
+permissions:
+    contents: read
+
+jobs:
+    pypi-publish:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v6.0.2
+              with:
+                  fetch-depth: 0
+            - uses: astral-sh/setup-uv@v7.2.0
+              with:
+                  python-version: '3.14'
+                  enable-cache: true
+            - name: Build package
+              run: uv build
+            - name: Publish package to PyPI
+              uses: pypa/gh-action-pypi-publish@v1.13.0
+              with:
+                  user: __token__
+                  password: ${{ secrets.PYPI_TOKEN }}

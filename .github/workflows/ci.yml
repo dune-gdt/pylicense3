@@ -1,0 +1,59 @@
+name: CI
+
+on:
+    push:
+        branches:
+            - main
+    pull_request:
+        branches:
+            - main
+
+concurrency:
+    group: ci-${{ github.workflow }}-${{ github.ref }}
+    cancel-in-progress: true
+
+jobs:
+    lint:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v6.0.2
+            - uses: astral-sh/setup-uv@v7.2.0
+              with:
+                  python-version: '3.14'
+                  enable-cache: true
+            - name: Ruff lint
+              run: uv run --group lint ruff check .
+            - name: Ruff format
+              run: uv run --group lint ruff format --check .
+
+    test:
+        runs-on: ${{ matrix.os }}
+        strategy:
+            fail-fast: false
+            matrix:
+                os: [ubuntu-latest, macos-latest, windows-latest]
+                python-version: ['3.14', '3.15']
+
+        steps:
+            - uses: actions/checkout@v6.0.2
+            - uses: astral-sh/setup-uv@v7.2.0
+              with:
+                  python-version: ${{ matrix.python-version }}
+                  enable-cache: true
+            - name: Run tests
+              run: uv run --group test pytest
+
+    docs:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v6.0.2
+            - uses: astral-sh/setup-uv@v7.2.0
+              with:
+                  python-version: '3.14'
+                  enable-cache: true
+            - name: Build docs
+              run: uv run --group docs sphinx-build -W -b html docs docs/_build/html
+            - uses: actions/upload-artifact@v6.0.0
+              with:
+                  name: docs-html
+                  path: docs/_build/html

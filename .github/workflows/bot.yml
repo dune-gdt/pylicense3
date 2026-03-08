@@ -1,23 +1,38 @@
----
-name: Dependabot auto-merge
-on: pull_request
+name: Dependabot Auto-merge
+
+on:
+    pull_request:
+        types:
+            - opened
+            - reopened
+            - synchronize
 
 permissions:
     pull-requests: write
     contents: write
 
+concurrency:
+    group: dependabot-automerge-${{ github.event.pull_request.number }}
+    cancel-in-progress: true
+
 jobs:
     dependabot:
         runs-on: ubuntu-latest
-        if: ${{ github.actor == 'dependabot[bot]' }}
+        if: >
+            github.actor == 'dependabot[bot]' &&
+            github.repository == 'dune-gdt/pylicense3'
         steps:
             - name: Dependabot metadata
               id: metadata
               uses: dependabot/fetch-metadata@v2.5.0
               with:
                   github-token: ${{ secrets.GITHUB_TOKEN }}
+
             - name: Enable auto-merge for Dependabot PRs
+              if: >
+                  steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
+                  steps.metadata.outputs.update-type == 'version-update:semver-minor'
               run: gh pr merge --auto --merge "$PR_URL"
               env:
-                  PR_URL: ${{github.event.pull_request.html_url}}
-                  GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+                  PR_URL: ${{ github.event.pull_request.html_url }}
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
