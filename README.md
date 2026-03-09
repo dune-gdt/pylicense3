@@ -1,40 +1,42 @@
-pylicense3
-=========
+# pylicense3
 
-[![image](https://img.shields.io/pypi/v/pylicense3.svg)](https://pypi.python.org/pypi/pylicense3)
-
-[![image](https://github.com/dune-gdt/pylicense3/workflows/pytest/badge.svg)](https://github.com/dune-gdt/pylicense3/actions)
-
-[![Documentation Status](https://readthedocs.org/projects/pylicense3/badge/?version=latest)](https://pylicense3.readthedocs.io/en/latest/?badge=latest)
-
+[![PyPI version](https://img.shields.io/pypi/v/pylicense3.svg)](https://pypi.org/project/pylicense3)
+[![CI](https://github.com/dune-gdt/pylicense3/actions/workflows/ci.yml/badge.svg)](https://github.com/dune-gdt/pylicense3/actions/workflows/ci.yml)
+[![Documentation Status](https://readthedocs.org/projects/pylicense3/badge/?version=latest)](https://pylicense3.readthedocs.io/en/latest/)
 
 Apply license information to a git project.
 
--   Free software: BSD license
--   Documentation: <https://pylicense3.readthedocs.io>.
--   [![Live examples](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/dune-gdt/pylicense3/HEAD?filepath=docs%2Fexamples%2F)
+## Requirements
 
+- Python `3.10+`
+- [uv](https://docs.astral.sh/uv/)
 
-Features
---------
+## Quick Start
 
--   TODO
+```bash
+uv sync
+uv run pylicense3 --help
+```
 
-After generating your project
------------------------------
+## Development
 
-- Setup github secrets for pypi [github project settings](https://github.com/dune-gdt/pylicense3/settings/secrets/actions/new):
-   - `PYPI_TOKEN` for "real" deploys on git tags
-   - `TEST_PYPI_TOKEN` for deploys to test.pypi.org
-- enable project on [readthedocs.org](https://readthedocs.org/dashboard/import/?)
-- setup branch protection+automerge in [github project settings](https://github.com/dune-gdt/pylicense3/settings/branches)
-- Fix `Live examples` link above
+```bash
+uv run --group lint ruff check .
+uv run --group lint ruff format .
+uv run --group test pytest
+uv run --group docs sphinx-build -W -b html docs docs/_build/html
+```
 
+Or use `make` wrappers:
 
-Credits
--------
+```bash
+make lint format test docs
+```
 
-This package was created with
-[Cookiecutter](https://github.com/audreyr/cookiecutter) and the
-[dune-gdt/python_cookiecutter](https://github.com/dune-gdt/python_cookiecutter)
-project template.
+## Release
+
+Tags matching `v*` trigger `.github/workflows/release.yml`, which builds with `uv build` and publishes to PyPI via `PYPI_TOKEN`.
+
+## License
+
+BSD-2-Clause

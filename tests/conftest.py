@@ -5,5 +5,5 @@ as this can have strange side effects.
 """
 
 pytest_plugins = [
-    "tests.fixtures",
+    'tests.fixtures',
 ]
