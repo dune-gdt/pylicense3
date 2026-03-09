@@ -8,7 +8,7 @@ Apply license information to a git project.
 
 ## Requirements
 
-- Python `3.14+`
+- Python `3.10+`
 - [uv](https://docs.astral.sh/uv/)
 
 ## Quick Start

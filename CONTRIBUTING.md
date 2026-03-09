@@ -8,7 +8,7 @@ cd pylicense3
 uv sync
 ```
 
-The project targets Python `3.14+`.
+The project targets Python `3.10+`.
 
 ## Common Commands
 
