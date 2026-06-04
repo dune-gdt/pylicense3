@@ -21,13 +21,37 @@ import importlib.util
 import re
 import subprocess
 from collections import defaultdict
+from collections.abc import Iterator
 from pathlib import Path
+from types import ModuleType
+from typing import TextIO, TypedDict
 
 from docopt import docopt
+
+#: Leading UTF-8 byte-order-mark bytes (read as individual code points under
+#: ``errors='surrogateescape'``) that should be stripped from a file's first line.
+_BOM_BYTES = '\xef\xbb\xbf'
+
+#: Header lines that always describe boilerplate we regenerate and therefore discard.
+_DISCARDABLE_PREFIXES = ['Copyright', 'copyright', 'License']
+
+#: URL schemes used to detect stray links in an existing header.
+_URL_SCHEMES = ('http://', 'https://')
+
+#: Default copyright statement when the config does not provide one.
+_DEFAULT_COPYRIGHT = 'The copyright lies with the authors of this file (see below).'
 
 
 class GitError(Exception):
     """Raised when git metadata required for header generation cannot be computed."""
+
+
+class FileHeader(TypedDict):
+    """Parsed pieces of an existing file header that are preserved on rewrite."""
+
+    shebang: str | None
+    encoding: str | None
+    comments: list[str]
 
 
 def _compile_patterns(patterns: list[str]) -> re.Pattern[str]:
@@ -43,7 +67,13 @@ def _format_year_range(year_range: int | tuple[int, int]) -> str:
     return f'{year_range}'
 
 
-def process_dir(dirname: str, config):
+def process_dir(dirname: str, config: ModuleType) -> Iterator[tuple[str, str]]:
+    """Yield ``(filename, root)`` pairs for every file under ``dirname`` to process.
+
+    A single file is yielded directly. For a directory, files are matched against
+    the config's ``include_patterns`` (default ``['*']``) and filtered by its
+    ``exclude_patterns``.
+    """
     candidate = Path(dirname)
     if candidate.is_file():
         yield str(candidate), ''
@@ -67,6 +97,11 @@ def process_dir(dirname: str, config):
 
 
 def get_git_authors(filename: str, root: str) -> dict[str, str]:
+    """Return a mapping of author name to a formatted span of contribution years.
+
+    Years are read from ``git log`` for ``filename`` (relative to ``root``) and
+    consecutive years are collapsed into ``start - end`` ranges.
+    """
     years_per_author: dict[str, set[int]] = defaultdict(set)
     filename_path = Path(filename)
     root_path = Path(root)
@@ -127,8 +162,24 @@ def get_git_authors(filename: str, root: str) -> dict[str, str]:
     return authors
 
 
-def read_current_header(source_iter, prefix, project_name, copyright_statement, license_str, url, lead_in, lead_out):
-    header = {'shebang': None, 'encoding': None, 'comments': []}
+def read_current_header(
+    source_iter: Iterator[str | None],
+    prefix: str,
+    project_name: str,
+    copyright_statement: str,
+    license_str: str,
+    url: str | None,
+    lead_in: str | None,
+    lead_out: str | None,
+) -> tuple[FileHeader, str, str | None]:
+    """Consume and parse an existing header from ``source_iter``.
+
+    Boilerplate (project name, copyright, license, known URLs) is discarded while
+    the shebang, encoding declaration and any free-form comments are retained.
+    Returns the parsed :class:`FileHeader`, an optional warning string and the
+    first line that is *not* part of the header (or ``None`` at end of input).
+    """
+    header: FileHeader = {'shebang': None, 'encoding': None, 'comments': []}
     warning = ''
     could_be_an_author = False
     while True:
@@ -136,10 +187,7 @@ def read_current_header(source_iter, prefix, project_name, copyright_statement, 
         if line is None:
             break
 
-        dirt_to_remove = ['\xef', '\xbb', '\xbf']
-        while len(line) > 0 and line[0] in dirt_to_remove:
-            for dirt in dirt_to_remove:
-                line = line.lstrip(dirt)
+        line = line.lstrip(_BOM_BYTES)
 
         if len(line) == 0:
             break
@@ -151,25 +199,25 @@ def read_current_header(source_iter, prefix, project_name, copyright_statement, 
         if not line.startswith(prefix):
             break
 
-        can_be_discarded = ['Copyright', 'copyright', 'License']
+        can_be_discarded = list(_DISCARDABLE_PREFIXES)
         for entry in (project_name, copyright_statement, license_str):
             for raw_line in entry.split('\n'):
                 can_be_discarded.append(raw_line.strip().lstrip(prefix).strip())
 
-        line_without_prefix = line[len(prefix) :].strip()
+        line_without_prefix = line.removeprefix(prefix).strip()
         if re.match(r'.*coding[:=]\s*', line):
-            header['encoding'] = line[len(prefix) :]
+            header['encoding'] = line.removeprefix(prefix)
         elif any(line_without_prefix.startswith(discard) for discard in can_be_discarded) or (
             url and line_without_prefix.startswith(url)
         ):
             continue
-        elif any(line_without_prefix.startswith(some_url) for some_url in ('http://', 'https://')):
+        elif any(line_without_prefix.startswith(some_url) for some_url in _URL_SCHEMES):
             warning = f"dropping url '{line_without_prefix}'!"
         elif line_without_prefix.startswith('Authors:'):
             could_be_an_author = True
             continue
         elif could_be_an_author:
-            if line[len(prefix) :].startswith('  ') and line.strip()[-1:] == ')':
+            if line.removeprefix(prefix).startswith('  ') and line.strip()[-1:] == ')':
                 continue
             could_be_an_author = False
             header['comments'].append(line)
@@ -180,18 +228,23 @@ def read_current_header(source_iter, prefix, project_name, copyright_statement, 
 
 
 def write_header(
-    target,
-    header,
-    authors,
-    license_str,
-    prefix,
-    project_name,
-    url,
-    max_width,
-    copyright_statement,
-    lead_in,
-    lead_out,
-):
+    target: TextIO,
+    header: FileHeader,
+    authors: str | dict[str, str],
+    license_str: str,
+    prefix: str,
+    project_name: str,
+    url: str | None,
+    max_width: int,
+    copyright_statement: str,
+    lead_in: str | None,
+    lead_out: str | None,
+) -> None:
+    """Write a freshly generated license header (and preserved comments) to ``target``.
+
+    ``authors`` may be a pre-formatted string or a mapping of name to year span;
+    the latter is rendered as an aligned ``Authors:`` block.
+    """
     shebang, encoding = header['shebang'], header['encoding']
     if shebang:
         target.write(f'{shebang}\n')
@@ -230,9 +283,9 @@ def write_header(
                 padded_author = author.ljust(max_author_length)
             target.write(f'{prefix}   {padded_author} {year}\n')
 
-    def prune_first_empty_comments(lines):
+    def prune_first_empty_comments(lines: list[str]) -> list[str]:
         first_real_comment_line = False
-        result = []
+        result: list[str] = []
         for raw_line in lines:
             raw_line = raw_line.strip()
             if first_real_comment_line:
@@ -256,15 +309,16 @@ def write_header(
         target.write(f'{lead_out}\n')
 
 
-def process_file(filename, config, root):
+def process_file(filename: str, config: ModuleType, root: str, verbose: bool = False) -> str:
+    """Rewrite ``filename`` in place with a regenerated license header.
+
+    The existing header is parsed and replaced while the file body, shebang and
+    encoding declaration are preserved. Returns a (possibly empty) warning string.
+    """
     project_name = config.name.strip()
     license_str = config.license
     url = getattr(config, 'url', None)
-    copyright_statement = getattr(
-        config,
-        'copyright_statement',
-        'The copyright lies with the authors of this file (see below).',
-    )
+    copyright_statement = getattr(config, 'copyright_statement', _DEFAULT_COPYRIGHT)
     max_width = getattr(config, 'max_width', 78)
     prefix = getattr(config, 'prefix', '#')
     lead_out = getattr(config, 'lead_out', None)
@@ -277,9 +331,10 @@ def process_file(filename, config, root):
     source.append(None)
     source_iter = iter(source)
 
-    print('*' * 88)
-    print(license_str)
-    print('*' * 88)
+    if verbose:
+        print('*' * 88)
+        print(license_str)
+        print('*' * 88)
     header, warning, last_header_line = read_current_header(
         source_iter,
         prefix,
@@ -318,9 +373,11 @@ def process_file(filename, config, root):
     return warning
 
 
-def main():
+def main() -> None:
+    """CLI entry point: load the config module and process the requested path."""
     args = docopt(__doc__)
     cfg = args['--cfg']
+    verbose = bool(args['--verbose'])
 
     spec = importlib.util.spec_from_file_location('config', cfg)
     if spec is None or spec.loader is None:
@@ -333,7 +390,7 @@ def main():
         display_name = filename[len(dirname) :] if dirname and filename.startswith(dirname) else filename
         print(f'{display_name}: ', end='')
         try:
-            result = process_file(filename, config, dirname if dirname else '.')
+            result = process_file(filename, config, dirname if dirname else '.', verbose=verbose)
             print(result if result else 'success')
         except GitError as error:
             print(error)
