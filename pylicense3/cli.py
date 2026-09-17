@@ -41,6 +41,9 @@ _URL_SCHEMES = ('http://', 'https://')
 #: Default copyright statement when the config does not provide one.
 _DEFAULT_COPYRIGHT = 'The copyright lies with the authors of this file (see below).'
 
+#: Indent used for a project url that does not fit on the project name line.
+_URL_CONTINUATION_INDENT = '   '
+
 
 class GitError(Exception):
     """Raised when git metadata required for header generation cannot be computed."""
@@ -261,10 +264,11 @@ def write_header(
             target.write(f'{line} ({url}).\n')
         else:
             target.write(f'{line}\n')
-            if max_width - len(prefix) - 1 - len(url):
-                target.write(f'{prefix}   {url}\n')
-            else:
-                target.write(f'{prefix} {url}\n')
+            # Indent the wrapped url as a continuation of the project name, but
+            # fall back to a single space when that indent would not fit.
+            indented_width = len(prefix) + len(_URL_CONTINUATION_INDENT) + len(url)
+            indent = _URL_CONTINUATION_INDENT if indented_width <= max_width else ' '
+            target.write(f'{prefix}{indent}{url}\n')
 
     target.write(f'{prefix} {copyright_statement}\n')
 
