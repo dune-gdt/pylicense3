@@ -5,10 +5,14 @@
 from io import StringIO
 from pathlib import Path
 
+import pytest
+
 from pylicense3.cli import (
+    GitError,
     _compile_patterns,
     _format_year_range,
     get_git_authors,
+    main,
     process_dir,
     process_file,
     read_current_header,
@@ -72,7 +76,7 @@ def test_read_current_header_parses_and_discards_boilerplate():
         '\n',
         None,
     ]
-    header, warning, last_line = read_current_header(
+    header, warnings, last_line = read_current_header(
         iter(source),
         prefix='#',
         project_name='Example Project',
@@ -89,13 +93,13 @@ def test_read_current_header_parses_and_discards_boilerplate():
     # Regenerated boilerplate must not survive into the preserved comments.
     assert not any('Example Project' in comment for comment in header['comments'])
     assert not any('Authors' in comment for comment in header['comments'])
-    assert warning == ''
+    assert warnings == []
     assert last_line == '\n'
 
 
 def test_read_current_header_warns_about_stray_url():
     source = ['# https://stray.example/link\n', '\n', None]
-    _header, warning, _last_line = read_current_header(
+    _header, warnings, _last_line = read_current_header(
         iter(source),
         prefix='#',
         project_name='Example Project',
@@ -106,7 +110,27 @@ def test_read_current_header_warns_about_stray_url():
         lead_out=None,
     )
 
-    assert 'stray.example' in warning
+    assert len(warnings) == 1
+    assert 'stray.example' in warnings[0]
+
+
+def test_read_current_header_collects_every_stray_url():
+    source = ['# https://first.example/link\n', '# http://second.example/link\n', '\n', None]
+    _header, warnings, _last_line = read_current_header(
+        iter(source),
+        prefix='#',
+        project_name='Example Project',
+        copyright_statement='Copyright statement here',
+        license_str='BSD-2-Clause',
+        url=None,
+        lead_in=None,
+        lead_out=None,
+    )
+
+    # A second stray url must not overwrite the first one.
+    assert len(warnings) == 2
+    assert 'first.example' in warnings[0]
+    assert 'second.example' in warnings[1]
 
 
 def test_write_header_renders_full_block():
@@ -144,13 +168,44 @@ def test_process_file_rewrites_header_and_preserves_body(git_repo, make_config):
     source.write_text('print("hello")\n')
     config = make_config(url='https://example.org', contributors_team='Alice (2020)')
 
-    warning = process_file(str(source), config, str(git_repo.path))
+    result = process_file(str(source), config, str(git_repo.path))
 
-    result = source.read_text()
-    assert '# Example Project (https://example.org).' in result
-    assert '# Alice (2020)' in result
-    assert 'print("hello")' in result
-    assert warning == ''
+    rewritten = source.read_text()
+    assert '# Example Project (https://example.org).' in rewritten
+    assert '# Alice (2020)' in rewritten
+    assert 'print("hello")' in rewritten
+    assert result.changed
+    assert result.warnings == []
+
+
+def test_process_file_reports_unchanged_on_second_run(git_repo, make_config):
+    git_repo.commit('mod.py', 'print("hello")\n', 'Alice', 'alice@example.com', 2020)
+    source = git_repo.path / 'mod.py'
+    config = make_config(url='https://example.org')
+
+    assert process_file(str(source), config, str(git_repo.path)).changed
+    already_applied = source.read_text()
+    mtime = source.stat().st_mtime_ns
+
+    result = process_file(str(source), config, str(git_repo.path))
+
+    assert not result.changed
+    assert source.read_text() == already_applied
+    # A file whose header is already up to date must not be touched at all.
+    assert source.stat().st_mtime_ns == mtime
+
+
+def test_process_file_reports_warnings_alongside_changed(git_repo, make_config):
+    git_repo.commit('seed.txt', 'seed\n', 'Seed', 'seed@example.com', 2019)
+    source = git_repo.path / 'mod.py'
+    source.write_text('# https://stray.example/link\n\nprint("hello")\n')
+    config = make_config(url='https://example.org', contributors_team='Alice (2020)')
+
+    result = process_file(str(source), config, str(git_repo.path))
+
+    assert result.changed
+    assert len(result.warnings) == 1
+    assert 'stray.example' in result.warnings[0]
 
 
 def test_process_dir_applies_include_and_exclude(tmp_path, make_config):
@@ -174,3 +229,64 @@ def test_process_dir_yields_single_file(tmp_path, make_config):
     results = list(process_dir(str(single), make_config()))
 
     assert results == [(str(single), '')]
+
+
+def _write_config(tmp_path):
+    """Write a minimal config module for the CLI and return its path."""
+    config = tmp_path / 'license_config.py'
+    config.write_text("name = 'Example Project'\nlicense = 'BSD-2-Clause'\n")
+    return config
+
+
+def test_main_reports_updated_then_unchanged(git_repo, tmp_path, monkeypatch, capsys):
+    git_repo.commit('mod.py', 'print("hello")\n', 'Alice', 'alice@example.com', 2020)
+    source = git_repo.path / 'mod.py'
+    config = _write_config(tmp_path)
+    # A single-file PATH makes the CLI resolve git history against the cwd.
+    monkeypatch.chdir(git_repo.path)
+    monkeypatch.setattr('sys.argv', ['pylicense3', '--cfg', str(config), str(source)])
+
+    main()
+    assert capsys.readouterr().out.strip().endswith(': updated')
+
+    main()
+    captured = capsys.readouterr()
+    assert captured.out.strip().endswith(': unchanged')
+    assert captured.err == ''
+
+
+def test_main_separates_warnings_from_success(git_repo, tmp_path, monkeypatch, capsys):
+    git_repo.commit('mod.py', '# https://stray.example/link\n\nprint("hello")\n', 'Alice', 'alice@example.com', 2020)
+    source = git_repo.path / 'mod.py'
+    config = _write_config(tmp_path)
+    # A single-file PATH makes the CLI resolve git history against the cwd.
+    monkeypatch.chdir(git_repo.path)
+    monkeypatch.setattr('sys.argv', ['pylicense3', '--cfg', str(config), str(source)])
+
+    main()
+
+    captured = capsys.readouterr()
+    # The success signal stays on stdout, the caveat goes to stderr.
+    assert captured.out.strip().endswith(': updated')
+    assert 'warning: ' in captured.err
+    assert 'stray.example' in captured.err
+
+
+def test_main_reports_failures_on_stderr_and_exits_non_zero(tmp_path, monkeypatch, capsys):
+    source = tmp_path / 'mod.py'
+    source.write_text('print("hello")\n')
+    config = _write_config(tmp_path)
+    monkeypatch.setattr('sys.argv', ['pylicense3', '--cfg', str(config), str(source)])
+
+    def fail(*_args, **_kwargs):
+        raise GitError('failed to extract authors from git history!')
+
+    monkeypatch.setattr('pylicense3.cli.process_file', fail)
+
+    with pytest.raises(SystemExit) as excinfo:
+        main()
+
+    assert excinfo.value.code == 1
+    captured = capsys.readouterr()
+    assert captured.out == ''
+    assert 'error: failed to extract authors' in captured.err
