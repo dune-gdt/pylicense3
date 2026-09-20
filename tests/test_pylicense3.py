@@ -137,6 +137,45 @@ def test_write_header_renders_full_block():
     assert '# keep me' in text
 
 
+def _write_header_url_lines(url: str, max_width: int) -> list[str]:
+    """Render a header for ``url`` and return the project name/url lines."""
+    target = StringIO()
+    write_header(
+        target,
+        {'shebang': None, 'encoding': None, 'comments': []},
+        'Alice (2020)',
+        license_str='BSD-2-Clause',
+        prefix='#',
+        project_name='Example Project',
+        url=url,
+        max_width=max_width,
+        copyright_statement='Copyright statement here',
+        lead_in=None,
+        lead_out=None,
+    )
+
+    return target.getvalue().splitlines()[:2]
+
+
+def test_write_header_indents_wrapped_url_when_it_fits():
+    url = 'https://example.org/some/long/path'
+    # 17 (project line) + 34 (url) + 3 does not fit into 40, so the url wraps;
+    # the indented url line is 38 characters and still fits.
+    lines = _write_header_url_lines(url, max_width=40)
+
+    assert lines == ['# Example Project', f'#   {url}']
+    assert len(lines[1]) <= 40
+
+
+def test_write_header_falls_back_to_single_space_when_indent_does_not_fit():
+    url = 'https://example.org/some/long/path'
+    # The indented url would need 38 characters, so only a single space fits.
+    lines = _write_header_url_lines(url, max_width=36)
+
+    assert lines == ['# Example Project', f'# {url}']
+    assert len(lines[1]) <= 36
+
+
 def test_process_file_rewrites_header_and_preserves_body(git_repo, make_config):
     # Ensure HEAD exists so the eager git-author lookup returns cleanly.
     git_repo.commit('seed.txt', 'seed\n', 'Seed', 'seed@example.com', 2019)
