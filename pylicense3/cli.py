@@ -20,8 +20,11 @@ import fnmatch
 import importlib.util
 import re
 import subprocess
+import sys
 from collections import defaultdict
 from collections.abc import Iterator
+from dataclasses import dataclass, field
+from io import StringIO
 from pathlib import Path
 from types import ModuleType
 from typing import TextIO, TypedDict
@@ -55,6 +58,19 @@ class FileHeader(TypedDict):
     shebang: str | None
     encoding: str | None
     comments: list[str]
+
+
+@dataclass(frozen=True)
+class ProcessResult:
+    """Outcome of processing a single file.
+
+    ``changed`` reports whether the file's content was actually rewritten and is
+    independent of ``warnings``: a file can be left untouched and still produce a
+    warning, and a rewritten file is not necessarily warning-free.
+    """
+
+    changed: bool
+    warnings: list[str] = field(default_factory=list)
 
 
 def _compile_patterns(patterns: list[str]) -> re.Pattern[str]:
@@ -174,16 +190,17 @@ def read_current_header(
     url: str | None,
     lead_in: str | None,
     lead_out: str | None,
-) -> tuple[FileHeader, str, str | None]:
+) -> tuple[FileHeader, list[str], str | None]:
     """Consume and parse an existing header from ``source_iter``.
 
     Boilerplate (project name, copyright, license, known URLs) is discarded while
     the shebang, encoding declaration and any free-form comments are retained.
-    Returns the parsed :class:`FileHeader`, an optional warning string and the
-    first line that is *not* part of the header (or ``None`` at end of input).
+    Returns the parsed :class:`FileHeader`, a (possibly empty) list of warnings
+    about discarded content and the first line that is *not* part of the header
+    (or ``None`` at end of input).
     """
     header: FileHeader = {'shebang': None, 'encoding': None, 'comments': []}
-    warning = ''
+    warnings: list[str] = []
     could_be_an_author = False
     while True:
         line = next(source_iter)
@@ -215,7 +232,7 @@ def read_current_header(
         ):
             continue
         elif any(line_without_prefix.startswith(some_url) for some_url in _URL_SCHEMES):
-            warning = f"dropping url '{line_without_prefix}'!"
+            warnings.append(f"dropping url '{line_without_prefix}'!")
         elif line_without_prefix.startswith('Authors:'):
             could_be_an_author = True
             continue
@@ -227,7 +244,7 @@ def read_current_header(
         else:
             header['comments'].append(line)
 
-    return header, warning, line
+    return header, warnings, line
 
 
 def write_header(
@@ -313,11 +330,14 @@ def write_header(
         target.write(f'{lead_out}\n')
 
 
-def process_file(filename: str, config: ModuleType, root: str, verbose: bool = False) -> str:
+def process_file(filename: str, config: ModuleType, root: str, verbose: bool = False) -> ProcessResult:
     """Rewrite ``filename`` in place with a regenerated license header.
 
     The existing header is parsed and replaced while the file body, shebang and
-    encoding declaration are preserved. Returns a (possibly empty) warning string.
+    encoding declaration are preserved. The file is only touched when the
+    regenerated content differs from what is already on disk. Returns a
+    :class:`ProcessResult` describing whether the file changed and which
+    warnings were raised while parsing the previous header.
     """
     project_name = config.name.strip()
     license_str = config.license
@@ -332,6 +352,7 @@ def process_file(filename: str, config: ModuleType, root: str, verbose: bool = F
     with open(filename, encoding='utf-8', errors='surrogateescape') as source_file:
         source = source_file.readlines()
 
+    original = ''.join(source)
     source.append(None)
     source_iter = iter(source)
 
@@ -339,7 +360,7 @@ def process_file(filename: str, config: ModuleType, root: str, verbose: bool = F
         print('*' * 88)
         print(license_str)
         print('*' * 88)
-    header, warning, last_header_line = read_current_header(
+    header, warnings, last_header_line = read_current_header(
         source_iter,
         prefix,
         project_name,
@@ -351,34 +372,46 @@ def process_file(filename: str, config: ModuleType, root: str, verbose: bool = F
     )
 
     line = last_header_line
-    with open(filename, 'w', encoding='utf-8', errors='surrogateescape') as target:
-        while line is not None and line.isspace():
-            line = next(source_iter)
+    target = StringIO()
+    while line is not None and line.isspace():
+        line = next(source_iter)
 
-        write_header(
-            target,
-            header,
-            authors,
-            license_str,
-            prefix,
-            project_name,
-            url,
-            max_width,
-            copyright_statement,
-            lead_in,
-            lead_out,
-        )
-        target.write('\n')
+    write_header(
+        target,
+        header,
+        authors,
+        license_str,
+        prefix,
+        project_name,
+        url,
+        max_width,
+        copyright_statement,
+        lead_in,
+        lead_out,
+    )
+    target.write('\n')
 
-        while line is not None:
-            target.write(line)
-            line = next(source_iter)
+    while line is not None:
+        target.write(line)
+        line = next(source_iter)
 
-    return warning
+    rewritten = target.getvalue()
+    if rewritten == original:
+        return ProcessResult(changed=False, warnings=warnings)
+
+    with open(filename, 'w', encoding='utf-8', errors='surrogateescape') as target_file:
+        target_file.write(rewritten)
+
+    return ProcessResult(changed=True, warnings=warnings)
 
 
 def main() -> None:
-    """CLI entry point: load the config module and process the requested path."""
+    """CLI entry point: load the config module and process the requested path.
+
+    Every processed file reports its outcome on stdout as ``updated`` or
+    ``unchanged``; warnings and failures are reported separately on stderr and a
+    failure makes the process exit non-zero.
+    """
     args = docopt(__doc__)
     cfg = args['--cfg']
     verbose = bool(args['--verbose'])
@@ -390,14 +423,22 @@ def main() -> None:
     config = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(config)
 
+    failed = False
     for filename, dirname in process_dir(args['PATH'], config):
         display_name = filename[len(dirname) :] if dirname and filename.startswith(dirname) else filename
-        print(f'{display_name}: ', end='')
         try:
             result = process_file(filename, config, dirname if dirname else '.', verbose=verbose)
-            print(result if result else 'success')
         except GitError as error:
-            print(error)
+            failed = True
+            print(f'{display_name}: error: {error}', file=sys.stderr)
+            continue
+
+        print(f'{display_name}: {"updated" if result.changed else "unchanged"}')
+        for warning in result.warnings:
+            print(f'{display_name}: warning: {warning}', file=sys.stderr)
+
+    if failed:
+        raise SystemExit(1)
 
 
 if __name__ == '__main__':
